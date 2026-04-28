@@ -9,6 +9,8 @@
 
 ---
 
+![1777376012208](images/README/1777376012208.png)
+
 ## 🌟 功能亮点
 
 - **三种激活模式**
@@ -36,6 +38,7 @@
 
 ## 📦 项目结构
 
+```txt
 TronActivate/
 ├── index.html # 主页面
 ├── README.md # 说明文档
@@ -43,8 +46,10 @@ TronActivate/
 │ └── style.css # 样式文件
 └── lib/
 └── TronWeb.js # TronWeb 库（本地离线版）
+```
 
+**本地依赖说明**：
 
-**本地依赖说明**：  
-- `lib/TronWeb.js` 已集成，无需联网加载 CDN，适合离线或内网使用。  
+- `lib/TronWeb.js` 已集成，无需联网加载 CDN，适合离线或内网使用。
 - 如需更新库版本，可替换该文件。
+
