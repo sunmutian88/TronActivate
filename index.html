@@ -1,0 +1,442 @@
+<!--
+# ================================================================
+# Project      : TronActivate
+# Introduction : 主程序入口
+# File         : index.html
+# Author       : SunMutian
+# Email        : sunmutian88@gmail.com
+# Date         : 2026-04-28
+# Copyright (C) 2026 SunMutian. All rights reserved.
+# ================================================================
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRON 账户激活工具</title>
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+    <div class="card">
+        <h1>⚡ TRON 地址激活</h1>
+
+        <div class="mode-switch">
+            <div id="singleModeBtn" class="mode-btn active">单地址激活</div>
+            <div id="batchModeBtn" class="mode-btn">批量地址激活</div>
+            <div id="generateModeBtn" class="mode-btn">生成地址激活</div>
+        </div>
+
+        <div class="form-group">
+            <label>🌐 选择网络</label>
+            <div class="select-wrapper">
+                <select id="networkSelect">
+                    <option value="mainnet">主网 (Mainnet)</option>
+                    <option value="nile">Nile 测试网</option>
+                    <option value="shasta">Shasta 测试网</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>🔑 发起账户私钥</label>
+            <div class="input-with-icon">
+                <input type="password" id="privateKeyInput" placeholder="输入拥有TRX的私钥 (64位十六进制)" autocomplete="off" value="">
+                <button class="toggle-vis" id="togglePkBtn" title="显示/隐藏私钥">👁️</button>
+            </div>
+        </div>
+
+        <!-- 单个地址界面 -->
+        <div id="singleSection">
+            <div class="form-group">
+                <label>🎯 待激活地址</label>
+                <input type="text" id="targetAddress" placeholder="例: TS56wnaX23LxG5rB3WBJKei5zv88888888" autocomplete="off">
+            </div>
+        </div>
+
+        <!-- 批量导入界面 -->
+        <div id="batchSection" class="hidden">
+            <div class="form-group">
+                <label>📋 批量地址（每行一个）</label>
+                <textarea id="batchAddresses" rows="5" placeholder="Txxxxxxxx...&#10;Txxxxxxxx...&#10;Txxxxxxxx..."></textarea>
+            </div>
+        </div>
+
+        <!-- 生成并激活界面 -->
+        <div id="generateSection" class="hidden">
+            <div class="form-group">
+                <label>🔢 生成数量</label>
+                <input type="number" id="generateCount" value="1" min="1" max="100">
+            </div>
+        </div>
+        <!-- 公共费用预估 -->
+        <div class="fee-box">
+            <span class="fee-text" id="feeEstimate">总费用：-- TRX</span>
+            <div class="fee-selector">
+                <span style="font-size:0.8rem;">单位：</span>
+                <select id="currencyUnit">
+                    <option value="TRX">TRX</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="CNY">CNY (¥)</option>
+                </select>
+            </div>
+        </div>
+        <div class="warning" id="warningBox">
+            <i>⚠️</i>
+            <span><strong>安全提示：</strong>私钥仅在本地浏览器使用，不会上传。主网操作请务必确认环境安全。</span>
+        </div>
+        <button class="btn" id="activateBtn">🚀 立即激活账户</button>
+        <button class="btn export-btn hidden" id="exportBtn">📥 导出私钥 (TXT)</button>
+        <div id="resultBox" class="result"></div>
+        <div class="note">每地址激活费用：约 1.1 TRX(含创建费 + 带宽燃烧)</div>
+    </div>
+    <div class="footer">
+        <span>© 2026 SunMutian; Email: sunmutian88@gmail.com · </span>
+        <button id="viewSourceBtn" class="source-btn">📄 查看源代码</button>
+    </div>
+
+    <script src="./lib/TronWeb.js"></script>
+    <script>
+        (function() {
+            // DOM 元素
+            const networkSelect = document.getElementById('networkSelect');
+            const privateKeyInput = document.getElementById('privateKeyInput');
+            const togglePkBtn = document.getElementById('togglePkBtn');
+            const targetAddress = document.getElementById('targetAddress');
+            const batchAddresses = document.getElementById('batchAddresses');
+            const generateCount = document.getElementById('generateCount');
+            const currencyUnit = document.getElementById('currencyUnit');
+            const feeEstimate = document.getElementById('feeEstimate');
+            const activateBtn = document.getElementById('activateBtn');
+            const exportBtn = document.getElementById('exportBtn');
+            const resultBox = document.getElementById('resultBox');
+            const singleSection = document.getElementById('singleSection');
+            const batchSection = document.getElementById('batchSection');
+            const generateSection = document.getElementById('generateSection');
+            const singleModeBtn = document.getElementById('singleModeBtn');
+            const batchModeBtn = document.getElementById('batchModeBtn');
+            const generateModeBtn = document.getElementById('generateModeBtn');
+
+            let currentMode = 'single';
+            const NETWORKS = {
+                mainnet: {
+                    full: 'https://api.trongrid.io',
+                    solidity: 'https://api.trongrid.io',
+                    event: 'https://api.trongrid.io',
+                    explorer: 'https://tronscan.org/#/transaction/'
+                },
+                shasta: {
+                    full: 'https://api.shasta.trongrid.io',
+                    solidity: 'https://api.shasta.trongrid.io',
+                    event: 'https://api.shasta.trongrid.io',
+                    explorer: 'https://shasta.tronscan.org/#/transaction/'
+                },
+                nile: {
+                    full: 'https://nile.trongrid.io',
+                    solidity: 'https://nile.trongrid.io',
+                    event: 'https://nile.trongrid.io',
+                    explorer: 'https://nile.tronscan.org/#/transaction/'
+                }
+            };
+
+            let currentTronWeb = null;
+            let currentNetwork = 'nile';
+            let exchangeRates = { TRX_USD: 0.30, USD_CNY: 7.00 };
+            let generatedAccounts = [];
+            let canExport = false;
+
+            function initTronWebWithoutKey(networkKey) {
+                const cfg = NETWORKS[networkKey];
+                currentTronWeb = new TronWeb({
+                    fullHost: cfg.full,
+                    solidityNode: cfg.solidity,
+                    eventServer: cfg.event
+                });
+                currentNetwork = networkKey;
+            }
+            initTronWebWithoutKey('nile');
+
+            function createTronWebWithPrivateKey(pk, networkKey) {
+                const cfg = NETWORKS[networkKey];
+                return new TronWeb({
+                    fullHost: cfg.full,
+                    solidityNode: cfg.solidity,
+                    eventServer: cfg.event,
+                    privateKey: pk
+                });
+            }
+
+            // 模式切换
+            function switchMode(mode) {
+                currentMode = mode;
+                singleSection.classList.add('hidden');
+                batchSection.classList.add('hidden');
+                generateSection.classList.add('hidden');
+                exportBtn.classList.add('hidden');
+                canExport = false;
+                singleModeBtn.classList.remove('active');
+                batchModeBtn.classList.remove('active');
+                generateModeBtn.classList.remove('active');
+                hideResult();
+                if (mode === 'single') {
+                    singleSection.classList.remove('hidden');
+                    singleModeBtn.classList.add('active');
+                } else if (mode === 'batch') {
+                    batchSection.classList.remove('hidden');
+                    batchModeBtn.classList.add('active');
+                } else if (mode === 'generate') {
+                    generateSection.classList.remove('hidden');
+                    generateModeBtn.classList.add('active');
+                }
+                updateFeeEstimate();
+            }
+
+            singleModeBtn.addEventListener('click', () => switchMode('single'));
+            batchModeBtn.addEventListener('click', () => switchMode('batch'));
+            generateModeBtn.addEventListener('click', () => switchMode('generate'));
+
+            togglePkBtn.addEventListener('click', () => {
+                const type = privateKeyInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                privateKeyInput.setAttribute('type', type);
+                togglePkBtn.textContent = type === 'password' ? '👁️' : '🙈';
+            });
+
+            networkSelect.addEventListener('change', (e) => {
+                initTronWebWithoutKey(e.target.value);
+                hideResult();
+                updateFeeEstimate();
+            });
+
+            function showResult(message, type) {
+                resultBox.className = `result ${type}`;
+                resultBox.innerHTML = message;
+            }
+            function hideResult() {
+                resultBox.className = 'result';
+                resultBox.innerHTML = '';
+            }
+
+            // 获取汇率
+            async function fetchExchangeRates() {
+                try {
+                    const cgResp = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=tron&vs_currencies=usd');
+                    const cgData = await cgResp.json();
+                    exchangeRates.TRX_USD = cgData.tron.usd;
+                    const fxResp = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+                    const fxData = await fxResp.json();
+                    exchangeRates.USD_CNY = fxData.rates.CNY;
+                } catch (e) {
+                    console.warn('汇率获取失败，使用默认值', e);
+                }
+                updateFeeEstimate();
+            }
+            fetchExchangeRates();
+
+            // 费用预估（根据当前模式计算地址数量）
+            function updateFeeEstimate() {
+                const costPerAddr = 1.1;
+                let count = 1;
+                if (currentMode === 'single') {
+                    count = 1;
+                } else if (currentMode === 'batch') {
+                    const raw = batchAddresses.value.trim();
+                    if (raw) {
+                        count = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#')).length;
+                    } else {
+                        count = 0;
+                    }
+                } else if (currentMode === 'generate') {
+                    count = parseInt(generateCount.value) || 1;
+                }
+                const totalTRX = count * costPerAddr;
+                const trxUsd = exchangeRates.TRX_USD || 0.08;
+                const usdCny = exchangeRates.USD_CNY || 7.25;
+                const totalUSD = totalTRX * trxUsd;
+                const totalCNY = totalUSD * usdCny;
+                const unit = currencyUnit.value;
+                let display = '';
+                if (unit === 'TRX') {
+                    display = `总费用：<strong>${totalTRX.toFixed(2)} TRX</strong> <small>(≈ $${totalUSD.toFixed(2)} / ¥${totalCNY.toFixed(2)})</small>`;
+                } else if (unit === 'USD') {
+                    display = `总费用：<strong>$${totalUSD.toFixed(2)} USD</strong> <small>(≈ ${totalTRX.toFixed(2)} TRX / ¥${totalCNY.toFixed(2)})</small>`;
+                } else if (unit === 'CNY') {
+                    display = `总费用：<strong>¥${totalCNY.toFixed(2)} CNY</strong> <small>(≈ ${totalTRX.toFixed(2)} TRX / $${totalUSD.toFixed(2)})</small>`;
+                }
+                feeEstimate.innerHTML = display;
+            }
+
+            // 监听输入变化以更新预估
+            batchAddresses.addEventListener('input', updateFeeEstimate);
+            generateCount.addEventListener('input', updateFeeEstimate);
+            currencyUnit.addEventListener('change', updateFeeEstimate);
+
+            // 激活单个地址
+            async function activateSingleAddress(tronWeb, ownerAddress, addr) {
+                try {
+                    const transaction = await tronWeb.transactionBuilder.createAccount(addr, ownerAddress, { permissionId: 0 });
+                    const signedTx = await tronWeb.trx.sign(transaction);
+                    const receipt = await tronWeb.trx.sendRawTransaction(signedTx);
+                    if (receipt.result) {
+                        const txId = receipt.txid || receipt.transaction?.txID || '';
+                        const explorerBase = NETWORKS[currentNetwork].explorer;
+                        return { success: true, address: addr, txLink: `${explorerBase}${txId}`, txId: txId };
+                    } else {
+                        return { success: false, address: addr, error: receipt.resMessage || JSON.stringify(receipt) };
+                    }
+                } catch (error) {
+                    return { success: false, address: addr, error: error.message || '未知错误' };
+                }
+            }
+
+            // 主按钮
+            activateBtn.addEventListener('click', async () => {
+                const selectedNetwork = networkSelect.value;
+                const privateKey = privateKeyInput.value.trim();
+                hideResult();
+                exportBtn.classList.add('hidden');
+                canExport = false;
+
+                if (!privateKey) { showResult('❌ 请输入私钥', 'error'); return; }
+                if (!/^[0-9a-fA-F]{64}$/.test(privateKey)) {
+                    showResult('❌ 私钥格式无效', 'error'); return;
+                }
+
+                let addresses = [];
+                if (currentMode === 'single') {
+                    const addr = targetAddress.value.trim();
+                    if (!addr) { showResult('❌ 请输入地址', 'error'); return; }
+                    addresses = [addr];
+                } else if (currentMode === 'batch') {
+                    const raw = batchAddresses.value.trim();
+                    if (!raw) { showResult('❌ 请输入至少一个地址', 'error'); return; }
+                    addresses = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+                    if (addresses.length === 0) { showResult('❌ 没有有效地址', 'error'); return; }
+                } else if (currentMode === 'generate') {
+                    const count = parseInt(generateCount.value) || 1;
+                    if (count < 1 || count > 100) { showResult('❌ 数量需在 1-100 之间', 'error'); return; }
+                    generatedAccounts = [];
+                    for (let i = 0; i < count; i++) {
+                        const acc = currentTronWeb.utils.accounts.generateAccount();
+                        generatedAccounts.push({
+                            address: acc.address.base58,
+                            privateKey: acc.privateKey,
+                            activated: false,
+                            txLink: '',
+                            error: ''
+                        });
+                    }
+                    addresses = generatedAccounts.map(a => a.address);
+                }
+
+                for (const addr of addresses) {
+                    if (!currentTronWeb.isAddress(addr)) {
+                        showResult(`❌ 无效地址: ${addr}`, 'error'); return;
+                    }
+                }
+
+                let tronWeb;
+                try {
+                    tronWeb = createTronWebWithPrivateKey(privateKey, selectedNetwork);
+                    if (!tronWeb.defaultAddress.base58) throw new Error('私钥无效');
+                } catch (e) {
+                    showResult('❌ 私钥无效或网络连接失败', 'error'); return;
+                }
+                const ownerAddress = tronWeb.defaultAddress.base58;
+
+                try {
+                    const accountInfo = await tronWeb.trx.getAccount(ownerAddress);
+                    if (!accountInfo || Object.keys(accountInfo).length === 0) {
+                        showResult(`❌ 发起账户 ${ownerAddress} 未激活或无余额`, 'error'); return;
+                    }
+                    const balanceSun = accountInfo.balance || 0;
+                    const balanceTRX = tronWeb.fromSun(balanceSun);
+                    const needed = 1.1 * addresses.length;
+                    if (balanceTRX < needed) {
+                        showResult(`⚠️ 余额不足，需要至少 ${needed} TRX，当前 ${balanceTRX} TRX`, 'error'); return;
+                    }
+                } catch (e) {
+                    showResult('❌ 查询发起账户失败: ' + (e.message || '网络错误'), 'error'); return;
+                }
+
+                activateBtn.disabled = true;
+                activateBtn.textContent = '⏳ 处理中...';
+                showResult(`⏳ 正在激活 ${addresses.length} 个地址...`, 'info');
+
+                const total = addresses.length;
+                let successCount = 0;
+                const results = [];
+
+                for (let i = 0; i < addresses.length; i++) {
+                    const addr = addresses[i];
+                    let progressHtml = `<strong>进度 [${i+1}/${total}]</strong><br>`;
+                    for (const r of results) {
+                        if (r.success) progressHtml += `✅ ${r.address} - <a class="tx-link" href="${r.txLink}" target="_blank">查看</a><br>`;
+                        else progressHtml += `❌ ${r.address} - ${r.error}<br>`;
+                    }
+                    progressHtml += `⏳ 正在处理: ${addr} ...`;
+                    showResult(progressHtml, 'info');
+
+                    const res = await activateSingleAddress(tronWeb, ownerAddress, addr);
+                    results.push(res);
+                    if (res.success) successCount++;
+
+                    if (currentMode === 'generate' && generatedAccounts[i]) {
+                        generatedAccounts[i].activated = res.success;
+                        if (res.success) generatedAccounts[i].txLink = res.txLink;
+                        else generatedAccounts[i].error = res.error;
+                    }
+                }
+
+                let finalHtml = `<strong>激活完成：成功 ${successCount} / ${total}</strong><br><br>`;
+                for (const r of results) {
+                    if (r.success) finalHtml += `✅ ${r.address} - <a class="tx-link" href="${r.txLink}" target="_blank">查看</a><br>`;
+                    else finalHtml += `❌ ${r.address} - ${r.error}<br>`;
+                }
+                showResult(finalHtml, successCount === total ? 'success' : 'info');
+
+                if (currentMode === 'generate' && successCount > 0) {
+                    canExport = true;
+                    exportBtn.classList.remove('hidden');
+                }
+
+                activateBtn.disabled = false;
+                activateBtn.textContent = '🚀 立即激活账户';
+            });
+
+            // 导出私钥
+            exportBtn.addEventListener('click', () => {
+                if (!canExport || generatedAccounts.length === 0) return;
+                const activated = generatedAccounts.filter(acc => acc.activated);
+                if (activated.length === 0) {
+                    showResult('没有成功激活的账户可导出', 'error');
+                    return;
+                }
+                const lines = activated.map(acc => `地址: ${acc.address} ; 私钥: ${acc.privateKey}`);
+                const content = lines.join('\n');
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `tron_accounts_${Date.now()}.txt`;
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+
+            // 回车触发
+            targetAddress.addEventListener('keypress', (e) => { if (e.key === 'Enter') activateBtn.click(); });
+            privateKeyInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') activateBtn.click(); });
+            batchAddresses.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); activateBtn.click(); } });
+
+            // 初始费用预估
+            updateFeeEstimate();
+        })();
+
+        // 查看源代码
+        document.getElementById('viewSourceBtn').addEventListener('click', () => {
+            const source = document.documentElement.outerHTML;
+            const win = window.open('', '_blank', 'width=800,height=600,scrollbars=yes,resizable=yes');
+            win.document.write('<pre>' + source.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>');
+            win.document.title = '页面源代码';
+        });
+    </script>
+</body>
+</html>
